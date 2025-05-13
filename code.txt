@@ -1,0 +1,481 @@
+//////////////////////////////////////////////
+//        RemoteXY include library          //
+//////////////////////////////////////////////
+
+// RemoteXY select connection mode and include library 
+#define REMOTEXY_MODE__ESP8266WIFI_LIB_POINT
+#include <ESP8266WiFi.h>
+#include <RemoteXY.h>
+#include <Servo.h>
+#include <SPI.h>
+#include <Wire.h>
+
+// RemoteXY connection settings 
+#define REMOTEXY_WIFI_SSID "ROBOT"
+#define REMOTEXY_WIFI_PASSWORD "12345678"
+#define REMOTEXY_SERVER_PORT 6377
+
+#define echoPin 14 // attach pin D5 ESP8266 to pin Echo of HC-SR04
+#define trigPin 12 //attach pin D6 ESP8266 to pin Trig of HC-SR04
+long duration; // variable for the duration of sound wave travel
+int distance; // variable for the distance measurement
+
+
+// RemoteXY configurate  
+#pragma pack(push, 1)
+uint8_t RemoteXY_CONF[] =
+  { 255,6,0,0,0,66,0,13,8,0,
+  5,32,3,12,41,41,1,26,31,1,
+  3,79,16,16,12,1,31,82,240,159,
+  166,190,0,1,3,56,39,18,12,1,
+  31,240,159,146,191,0,1,3,79,39,
+  17,12,1,31,240,159,166,191,0,1,
+  3,56,16,17,12,1,31,76,240,159,
+  166,190,0 };
+  
+// this structure defines all the variables and events of your control interface 
+struct {
+
+    // input variables
+  int8_t J_x; // =-100..100 x-coordinate joystick position 
+  int8_t J_y; // =-100..100 y-coordinate joystick position 
+  uint8_t button_B; // =1 if button pressed, else =0 
+  uint8_t button_X; // =1 if button pressed, else =0 
+  uint8_t button_Y; // =1 if button pressed, else =0 
+  uint8_t button_A; // =1 if button pressed, else =0 
+
+    // other variable
+  uint8_t connect_flag;  // =1 if wire connected, else =0 
+
+} RemoteXY;
+#pragma pack(pop)
+
+/////////////////////////////////////////////
+//           END RemoteXY include          //
+/////////////////////////////////////////////
+
+//CALIBRATION SETTINGS:
+
+////////// 2:
+
+// Left foot forward walking rotation Speed
+int LFFWRS= 20;    // 0 = Slowest   90 = Fastest  Default = 12
+
+// Right foot forward walking rotation Speed
+int RFFWRS= 20;   // 0 = Slowest   90 = Fastest  Default = 12
+
+////////// 3:
+
+// Left foot Backward walking rotation Speed
+int LFBWRS= 20;   // 0 = Slowest   90 = Fastest  Default = 12
+
+// Right foot Backward walking rotation Speed
+int RFBWRS= 20;   // 0 = Slowest   90 = Fastest  Default = 12
+
+////////// 4:
+
+// Left Leg standing Position
+int LA0= 0;    // 0 = Full Tilt Right   180 = Full Tilt Left   Default = 60
+
+// Right Leg standing position
+int RA0= 180;   // 0 = Full Tilt Right   180 = Full Tilt Left   Default = 120
+
+////////// 5:
+
+// Left Leg tilt left walking position
+int LATL= 100;   // 0 = Full Tilt Right   180 = Full Tilt Left   Default BASIC = 85   Default HUMANOID = 80
+
+// Right Leg tilt left walking position
+int RATL= 175;  // 0 = Full Tilt Right   180 = Full Tilt Left   Default BASIC = 175   Default HUMANOID = 150
+
+// Left Leg tilt right walking position
+int LATR= 5;   // 0 = Full Tilt Right   180 = Full Tilt Left   Default BASIC = 5   Default HUMANOID = 30
+
+// Right Leg tilt right walking position
+int RATR= 80;  // 0 = Full Tilt Right   180 = Full Tilt Left   Default BASIC = 95  Default HUMANOID = 100
+
+////////// 6:
+
+// Left Leg roll Position
+
+int LA1= 180;   // 0 = Full Tilt Right   180 = Full Tilt Left   Default = 170
+
+// Right Leg roll position
+int RA1= 0;    // 0 = Full Tilt Right   180 = Full Tilt Left   Default = 10
+
+int LFFRRS=20;  // Left foot forward rolling rotation Speed   0 = SLOW   90 = FAST  
+int RFFRRS=20 ; // Right foot forward rolling rotation Speed  0 = SLOW   90 = FAST  
+int LFBRRS= 20; // Left foot Backward rolling rotation Speed  0 = SLOW   90 = FAST  
+int RFBRRS= 20; // Right foot Backward rolling rotation Speed 0 = SLOW   90 = FAST  
+
+
+////////////////////////////////////////
+
+int currentmillis1 = 0;
+int currentmillis2 = 0;
+int currentmillis3 = 0;
+// Mode counter for biped/wheel mode
+int ModeCounter = 0;
+
+const uint8_t ServoLeftFootPin   = 0;     //D3
+const uint8_t ServoLeftLegPin  = 2;     //D4
+const uint8_t ServoRightFootPin  = 13;      //D7
+const uint8_t ServoRightLegPin = 15;      //D8
+
+Servo myservoLeftFoot;
+Servo myservoLeftLeg;
+Servo myservoRightFoot;
+Servo myservoRightLeg;
+
+void setup() 
+{
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
+
+  myservoLeftFoot.attach(ServoLeftFootPin);
+  myservoRightFoot.attach(ServoRightFootPin);  
+  myservoLeftLeg.attach(ServoLeftLegPin);
+  myservoRightLeg.attach(ServoRightLegPin);
+
+  delay(300);
+  myservoLeftFoot.write(90);
+  myservoRightFoot.write(90);  
+  myservoLeftLeg.write(60);
+  myservoRightLeg.write(120);
+
+  myservoLeftFoot.detach();
+  myservoRightFoot.detach(); 
+  myservoLeftLeg.detach();
+  myservoRightLeg.detach();
+
+  Serial.begin(250000);
+  
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
+  RemoteXY_Init (); 
+  NinjaSetRoll();
+}
+
+void Distance() 
+{
+  // Clears the trigPin condition
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  duration = pulseIn(echoPin, HIGH);
+  // Calculating the distance
+  distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
+  // Displays the distance on the Serial Monitor
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+}
+
+
+void loop() 
+{ 
+
+  Distance();
+  
+
+  RemoteXY_Handler ();
+
+  if ((distance >= 2)&&(distance < 15))
+  {  
+    NinjaRollStop();
+    NinjaRollLeft();
+    delay(500);
+    NinjaRollStop();
+  }
+  
+  
+  if (RemoteXY.button_X == HIGH)
+  {        
+      NinjaSetRoll(); 
+      ModeCounter = 1;   
+  }
+  if (RemoteXY.button_Y == HIGH)
+  {
+      NinjaSetWalk();
+      ModeCounter = 0;
+  }
+
+  
+if (ModeCounter == 0) 
+{   
+    if ((RemoteXY.J_x >= -10) && (RemoteXY.J_x <= 10) && (RemoteXY.J_y >= -10) && (RemoteXY.J_y <= 10)) 
+    {
+        NinjaWalkStop();  // Stop when joystick is centered
+    }
+
+    if (RemoteXY.J_y > 10) 
+    {
+        NinjaWalkForward();  // Move forward
+    }
+
+    if (RemoteXY.J_y < -10) 
+    {
+        NinjaWalkBackward();  // Move backward
+    }
+
+    if (RemoteXY.J_x > 10) 
+    {
+        NinjaWalkRight();  // Move right
+    }
+
+    if (RemoteXY.J_x < -10) 
+    {
+        NinjaWalkLeft();  // Move left
+    }
+}
+
+if (ModeCounter == 1) 
+{  
+    if ((RemoteXY.J_x >= -10) && (RemoteXY.J_x <= 10) && (RemoteXY.J_y >= -10) && (RemoteXY.J_y <= 10)) 
+    {
+        NinjaRollStop();  // Stop when joystick is centered
+    }  
+    else 
+    {
+        if (RemoteXY.J_y > 10) 
+        {
+            NinjaRollForward();  // Move forward
+        }
+
+        if (RemoteXY.J_y < -10) 
+        {
+            NinjaRollBackward();  // Move backward
+        }
+
+        if (RemoteXY.J_x > 10) 
+        {
+            NinjaRollRight();  // Move right
+        }
+
+        if (RemoteXY.J_x < -10) 
+        {
+            NinjaRollLeft();  // Move left
+        }
+    }
+}
+
+
+ Serial.print("  X: ");  
+ Serial.print(RemoteXY.J_x);
+ Serial.print("  Y: ");  
+ Serial.print(RemoteXY.J_y);
+ Serial.print("  MC: ");  
+ Serial.println(ModeCounter);
+}
+
+void NinjaStop()
+{
+  myservoLeftFoot.detach();
+  myservoRightFoot.detach();  
+  myservoLeftLeg.detach();
+  myservoRightLeg.detach();
+}
+
+void NinjaSetWalk()
+{    
+      myservoLeftLeg.attach(ServoLeftLegPin);
+      myservoRightLeg.attach(ServoRightLegPin);                                                                          
+      myservoLeftLeg.write(LA0); 
+      myservoRightLeg.write(RA0); 
+      delay(300);
+      myservoLeftLeg.detach();
+      myservoRightLeg.detach();
+}   
+
+void NinjaSetRoll()
+{  
+      myservoLeftLeg.attach(ServoLeftLegPin);
+      myservoRightLeg.attach(ServoRightLegPin);                                                                          
+      myservoLeftLeg.write(LA1); 
+      myservoRightLeg.write(RA1); 
+      delay(300);
+      myservoLeftLeg.detach();
+      myservoRightLeg.detach();
+}
+
+void NinjaWalkStop()
+{
+    myservoLeftFoot.write(90);
+    myservoRightFoot.write(90);  
+    myservoLeftLeg.write(LA0); 
+    myservoRightLeg.write(RA0);  
+}
+
+void NinjaRollStop()
+{
+  myservoLeftFoot.write(90);
+  myservoRightFoot.write(90);  
+  myservoLeftFoot.detach();
+  myservoRightFoot.detach();  
+}
+
+
+
+void NinjaWalkForward()
+{
+ myservoLeftLeg.attach(ServoLeftLegPin);
+ myservoRightLeg.attach(ServoRightLegPin);
+ 
+ myservoLeftLeg.write(LATR); 
+ myservoRightLeg.write(RATR);
+ delay(300);
+ myservoRightFoot.attach(ServoRightFootPin);  
+ if((90-RFFWRS)<90){
+ myservoRightFoot.write(0);
+ }else{
+   myservoRightFoot.write(180);
+ }
+
+ delay(300);
+ myservoRightFoot.detach();
+ delay(100);
+ myservoLeftLeg.write(LATL); 
+ myservoRightLeg.write(RATL);
+ delay(300);
+ myservoLeftFoot.attach(ServoLeftFootPin); 
+ if((90+LFFWRS)<90){
+ myservoLeftFoot.write(0);
+ }else{
+   myservoLeftFoot.write(180);
+ }
+ delay(300);
+ myservoLeftFoot.detach();
+ delay(100);
+}
+
+void NinjaWalkBackward()
+{
+ myservoLeftLeg.attach(ServoLeftLegPin);
+ myservoRightLeg.attach(ServoRightLegPin);
+ 
+ myservoLeftLeg.write(LATR); 
+ myservoRightLeg.write(RATR);
+ delay(300);
+ myservoRightFoot.attach(ServoRightFootPin);  
+ if((90+RFBWRS)<90){
+ myservoRightFoot.write(0);
+ }else{
+   myservoRightFoot.write(180);
+ }
+ delay(300);
+ myservoRightFoot.detach();
+ delay(100);
+ myservoLeftLeg.write(LATL); 
+ myservoRightLeg.write(RATL);
+ delay(300);
+ myservoLeftFoot.attach(ServoLeftFootPin); 
+ if((90-LFBWRS)<90){
+ myservoLeftFoot.write(0);
+ }else{
+   myservoLeftFoot.write(180);
+ }
+ delay(300);
+ myservoLeftFoot.detach();
+ delay(100);
+}
+
+void NinjaWalkLeft()
+{
+ myservoLeftLeg.attach(ServoLeftLegPin);
+ myservoRightLeg.attach(ServoRightLegPin);
+ 
+ myservoLeftLeg.write(LATR); 
+ myservoRightLeg.write(RATR);
+ delay(300);
+ myservoRightFoot.attach(ServoRightFootPin);  
+ if((90-RFFWRS)<90){
+ myservoRightFoot.write(0);
+ }else{
+   myservoRightFoot.write(180);
+ }
+ delay(50);
+ myservoRightFoot.detach();
+ delay(100);
+ myservoLeftLeg.write(LATL); 
+ myservoRightLeg.write(RATL);
+ delay(300);
+ myservoLeftFoot.attach(ServoLeftFootPin); 
+  if((90+LFFWRS)<90){
+ myservoLeftFoot.write(0);
+ }else{
+   myservoLeftFoot.write(180);
+ }
+ delay(300);
+ myservoLeftFoot.detach();
+ delay(100);
+}
+
+void NinjaWalkRight()
+{
+ myservoLeftLeg.attach(ServoLeftLegPin);
+ myservoRightLeg.attach(ServoRightLegPin);
+ 
+ myservoLeftLeg.write(LATR); 
+ myservoRightLeg.write(RATR);
+ delay(300);
+ myservoRightFoot.attach(ServoRightFootPin);  
+ if((90-RFFWRS)<90){
+ myservoRightFoot.write(0);
+ }else{
+   myservoRightFoot.write(180);
+ }
+ delay(300);
+ myservoRightFoot.detach();
+ delay(100);
+ myservoLeftLeg.write(LATL); 
+ myservoRightLeg.write(RATL);
+ delay(300);
+ myservoLeftFoot.attach(ServoLeftFootPin); 
+  if((90+LFFWRS)<90){
+ myservoLeftFoot.write(0);
+ }else{
+   myservoLeftFoot.write(180);
+ }
+ delay(50);
+ myservoLeftFoot.detach();
+ delay(100);
+}
+
+
+void NinjaRollForward()
+{
+  myservoLeftFoot.attach(ServoLeftFootPin);
+  myservoRightFoot.attach(ServoRightFootPin);
+  myservoLeftFoot.write(180);
+  myservoRightFoot.write(0);
+}
+
+void NinjaRollBackward()
+{
+  myservoLeftFoot.attach(ServoLeftFootPin);
+  myservoRightFoot.attach(ServoRightFootPin);
+  myservoLeftFoot.write(0);
+  myservoRightFoot.write(180);
+}
+
+void NinjaRollRight()
+{
+  myservoLeftFoot.attach(ServoLeftFootPin);
+  myservoRightFoot.attach(ServoRightFootPin);
+  myservoLeftFoot.write(0);
+  myservoRightFoot.write(0);
+}
+
+void NinjaRollLeft()
+{
+  myservoLeftFoot.attach(ServoLeftFootPin);
+  myservoRightFoot.attach(ServoRightFootPin);
+  myservoLeftFoot.write(180);
+  myservoRightFoot.write(180);
+}
+
+
